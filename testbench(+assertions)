@@ -1,0 +1,86 @@
+module i2c_tb;
+
+    logic clk;
+    logic run;
+    logic rw;
+    logic [6:0] slave_addr;
+    logic [6:0] reg_addr;
+    logic [7:0] data_in;
+    logic [7:0] data_out;
+
+    logic scl;
+    logic sda; 
+--
+    initial begin
+        clk = 0;
+        forever #5 clk = ~clk; 
+    end
+
+    
+    i2c_master uut_master (
+        .slave_address_in(slave_addr),
+        .slave_register_address_in(reg_addr),
+        .data_in(data_in),
+        .rw(rw),
+        .run(run),
+        .clk(clk),
+        .sda(sda),
+        .scl(scl),
+        .data_out(data_out)
+    );
+
+    i2c_slave uut_slave (
+        .sda(sda),
+        .scl(scl)
+    );
+
+        assert (uut_slave.memory[5] == 8'hA5)
+        else $error("Write operation failed");
+
+
+        assert (received_slave_address == SLAVE_ID)
+        else $display("Slave address mismatch");
+
+        property start_condition;
+        @(negedge sda) scl == 1;
+        endproperty
+        assert property(start_condition)
+        $display("START detected");
+
+        property stop_condition;
+         @(posedge sda) scl == 1;
+        endproperty
+        assert property(stop_condition)
+        $display("STOP detected");
+
+    initial begin
+        // init
+        run = 0;
+        rw = 0;
+        slave_addr = 7'h12;   // must match one slave ID
+        reg_addr = 7'h05;
+        data_in = 8'h55;
+
+        #20;
+        rw = 0;   
+        run = 1;
+        #10;
+        run = 0;
+
+        #500;
+
+
+        rw = 1;   // read
+        run = 1;
+        #10;
+        run = 0;
+
+        #500;
+
+        $display("Read Data = %h", data_out);
+
+        #200;
+        $finish;
+    end
+
+endmodule
