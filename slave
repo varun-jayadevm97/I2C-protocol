@@ -1,0 +1,160 @@
+module i2c_slave(
+    inout logic sda,
+    input logic scl
+);
+
+    parameter SLAVE_ID0 = 7'h12;
+    parameter SLAVE_ID1 = 7'h34;
+    parameter SLAVE_ID2 = 7'h56;
+
+    logic data_direction;  
+    logic send_bit;
+    logic sda_in;
+
+    logic [6:0] slave_address;
+    logic [6:0] register_address;
+    logic [7:0] memory [0:127];         // an memory location to store the data coming from master if write operation
+    logic rw;
+
+     initial begin
+        for(int i = 0; i < 128; i = i + 1) begin
+            memory[i] = $random;
+        end
+        end
+   
+    assign sda = (data_direction == 0) ? send_bit : 1'bz;
+    assign sda_in = sda;
+
+    initial begin
+        data_direction = 1; 
+
+        forever begin
+            wait_for_start();
+            receive_slave_address();
+            check_and_send_ack();
+
+            if (match_found) begin
+                receive_register_address();
+                send_ack();
+
+                if (rw == 0)
+                    receive_data();
+                else
+                    send_data();
+            end
+
+            wait_for_stop();
+        end
+    end
+
+    logic match_found;
+
+    task wait_for_start();
+    begin
+        @(negedge sda_in);
+        if (scl == 1) begin
+            // START detected
+        end
+    end
+    endtask
+
+
+    task receive_slave_address();
+        integer i;
+    begin
+        match_found = 0;
+
+        for (i = 0; i < 7; i = i + 1) begin
+            @(posedge scl);
+            slave_address[i] = sda_in;
+        end
+
+        @(posedge scl);
+        rw = sda_in;
+
+
+        if (slave_address == SLAVE_ID0 ||
+            slave_address == SLAVE_ID1 ||
+            slave_address == SLAVE_ID2)
+            match_found = 1;
+    end
+    endtask
+
+    task check_and_send_ack();
+    begin
+        if (match_found)
+            send_ack();
+        else
+            data_direction = 1; 
+    end
+    endtask
+
+
+    task send_ack();
+    begin
+        @(negedge scl);
+        data_direction = 0;
+        send_bit = 0; 
+
+        @(posedge scl);
+
+        data_direction = 1; 
+    end
+    endtask
+
+
+    task receive_register_address();
+        integer i;
+    begin
+        for (i = 0; i < 7; i = i + 1) begin
+            @(posedge scl);
+            register_address[i] = sda_in;
+        end
+    end
+    endtask
+
+
+    task receive_data();
+        integer i;
+        reg [7:0] temp;
+    begin
+        for (i = 0; i < 8; i = i + 1) begin
+            @(posedge scl);
+            temp[i] = sda_in;
+        end
+
+        memory[register_address] = temp;
+        send_ack();
+    end
+    endtask
+
+   
+    task send_data();
+        integer i;
+        reg [7:0] temp;
+    begin
+        temp = memory[register_address];
+
+        for (i = 0; i < 8; i = i + 1) begin
+            @(negedge scl);
+            data_direction = 0;
+            send_bit = temp[i];
+            @(posedge scl);
+        end
+
+        data_direction = 1; 
+        @(posedge scl);     
+    end
+    endtask
+
+   
+    task wait_for_stop();
+    begin
+        @(posedge sda_in);
+        if (scl == 1) begin
+            // STOP detected
+        end
+    end
+    endtask
+
+endmodule
