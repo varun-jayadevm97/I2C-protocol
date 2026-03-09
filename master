@@ -1,0 +1,191 @@
+module i2c_master (
+    input logic [6:0] slave_address_in,
+    input logic [6:0] slave_register_address_in,
+    input logic [7:0] data_in,
+    input  logic      rw,          // 0 = write, 1 = read
+    input   logic     run,
+    input   logic     clk,
+    inout   logic     sda,
+    output  logic     scl,
+    output logic [7:0] data_out
+);
+
+
+    logic [6:0] slave_address;
+    logic [6:0] slave_register_address;
+    logic [7:0] write_register;
+    logic [7:0] read_register;
+    logic [28:0] frame;
+
+    logic io;
+    logic send_bit;
+    logic data_direction; // 0 = drive, 1 = receive
+    logic done;
+
+
+    assign sda = (data_direction == 0) ? send_bit : 1'bz;
+    logic sda_in = sda;
+
+
+    assign scl = clk;
+
+    always_ff @(posedge clk) begin
+
+        if (!run) begin
+            done <= 0;
+            slave_address <= slave_address_in;
+            slave_register_address <= slave_register_address_in;
+            write_register <= data_in;
+            io <= rw;
+            data_direction <= 0;
+            send_bit <= 1'b1;
+        end
+
+        else if (run && !done) begin
+            send_start_bit();
+            send_slave_address();
+            send_rw_signal(io);
+
+            receive_slave_address_valid_or_invalid_ack();
+
+            // ACK = 0 (corrected)
+            if (frame[9] == 1'b1) begin
+                done <= 1;
+            end
+
+            else begin
+                send_register_address();
+                receive_slave_address_valid_or_invalid_ack();
+
+                if (frame[18] == 1'b1) begin
+                    done <= 1;
+                end
+
+                else begin
+                    data_operation();
+                    send_stop_bit();
+                    done <= 1;
+                end
+            end
+        end
+    end
+
+
+    task send_start_bit();
+    begin
+        data_direction = 0;
+        send_bit = 1'b1;
+        frame[0] = send_bit;
+        @(posedge clk);
+    end
+    endtask
+
+    task send_slave_address();
+    integer i;
+    begin
+        for (i = 0; i <= 6; i = i + 1) begin
+            data_direction = 0;
+            send_bit = slave_address[i];
+            frame[i+1] = send_bit;
+            @(posedge clk);
+        end
+    end
+    endtask
+
+    task send_rw_signal(input bit a);
+    begin
+        data_direction = 0;
+        send_bit = a;
+        frame[8] = send_bit;
+        @(posedge clk);
+    end
+    endtask
+
+    task receive_slave_address_valid_or_invalid_ack();
+    begin
+        data_direction = 1;
+        @(posedge clk);
+        frame[9] = sda_in;
+    end
+    endtask
+
+    task send_register_address();
+    integer i;
+    begin
+        for (i = 0; i <= 6; i = i + 1) begin
+            data_direction = 0;
+            send_bit = slave_register_address[i];
+            frame[i+10] = send_bit;
+            @(posedge clk);
+        end
+    end
+    endtask
+
+    task data_operation();
+    begin
+        if (io == 0) begin
+            send_data();
+            receive_data_ack();
+        end
+        else begin
+            receive_data();
+            send_data_ack();
+        end
+    end
+    endtask
+
+    task send_data();
+    integer i;
+    begin
+        for (i = 0; i <= 7; i = i + 1) begin
+            data_direction = 0;
+            send_bit = write_register[i];
+            frame[i+19] = send_bit;
+            @(posedge clk);
+        end
+    end
+    endtask
+
+   
+    task receive_data();
+    integer i;
+    begin
+        for (i = 0; i <= 7; i = i + 1) begin
+            data_direction = 1;
+            @(posedge clk);
+            frame[i+19] = sda_in;
+            read_register[i] = sda_in;
+        end
+        data_out <= read_register;
+    end
+    endtask
+
+  
+    task send_data_ack();
+    begin
+        data_direction = 0;
+        send_bit = 1'b0; // ACK
+        frame[27] = send_bit;
+        @(posedge clk);
+    end
+    endtask
+
+
+    task receive_data_ack();
+    begin
+        data_direction = 1;
+        @(posedge clk);
+        frame[27] = sda_in;
+    end
+    endtask
+
+    task send_stop_bit();
+    begin
+        data_direction = 0;
+        send_bit = 1'b1;
+        frame[28] = send_bit;
+        @(posedge clk);
+    end
+    endtask
+
+endmodule
